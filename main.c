@@ -219,16 +219,39 @@ static portTASK_FUNCTION(vProductora, pvParameters)
 
     for (;;)
     {
-        // EA3b: tiempo aleatorio entre 1 y 3 segundos
         vTaskDelay(pdMS_TO_TICKS(1000));
 
         param.id = (rand() % 100) + 1;
+        param.ID_PROD = 1;
+        if (xQueueSend(cola, &param, 0) != pdPASS)
+        {
+
+            GPIOPinWrite(GPIO_PORTF_BASE, GPIO_PIN_1, GPIO_PIN_1);
+            // vTaskDelete(NULL);
+        }
+        else
+        {
+            GPIOPinWrite(GPIO_PORTF_BASE, GPIO_PIN_1, 0);
+        }
+    }
+}
+
+static portTASK_FUNCTION(vProductora2, pvParameters)
+{
+    PARAM_MENSAJE_PRODUCTO param;
+
+    for (;;)
+    {
+        vTaskDelay(pdMS_TO_TICKS(2000));
+
+        param.id = (rand() % 100) + 1;
+        param.ID_PROD = 2;
 
         if (xQueueSend(cola, &param, 0) != pdPASS)
         {
 
             GPIOPinWrite(GPIO_PORTF_BASE, GPIO_PIN_1, GPIO_PIN_1);
-            vTaskDelete(NULL);
+            // vTaskDelete(NULL);
         }
         else
         {
@@ -311,6 +334,11 @@ int main(void)
         while (1)
             ;
     }
+    if (xTaskCreate(vProductora2, "prod", 512, NULL, tskIDLE_PRIORITY + 1, NULL) != pdPASS) // 1
+    {
+        while (1)
+            ;
+    }
     if (xTaskCreate(vConsumidora, "cons", 512, NULL, tskIDLE_PRIORITY + 1, NULL) != pdPASS) // 1
     {
         while (1)
@@ -334,7 +362,7 @@ int main(void)
             ;
     }*/
     // 2
-    cola = xQueueCreate(1, sizeof(PARAM_MENSAJE_PRODUCTO)); // 2
+    cola = xQueueCreate(3, sizeof(PARAM_MENSAJE_PRODUCTO)); // 2
     if (cola == NULL)
     {
         while (1)
