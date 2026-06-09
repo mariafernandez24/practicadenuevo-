@@ -46,9 +46,11 @@
 uint32_t g_ui32CPUUsage;
 uint32_t g_ui32SystemClock;
 SemaphoreHandle_t mutexUSB, mutexUART; // Para proteccion del canal USB y el caal UART -terminal-, ya que ahora lo van a usar varias tareas distintas
-SemaphoreHandle_t semaforo;            // 1
-uint32_t productosFabricados = 0;      // 1
-static uint8_t ledEstado = 0;          // 1
+// SemaphoreHandle_t semaforo;            // 1
+uint32_t productosFabricados = 0; // 1
+static uint8_t ledEstado = 0;     // 1
+
+QueueHandle_t cola; // 2
 //*****************************************************************************
 //
 // The error routine that is called if the driver library encounters an error.
@@ -212,15 +214,20 @@ static portTASK_FUNCTION(USBMessageProcessingTask, pvParameters)
     }
 }
 
-static portTASK_FUNCTION(vProductora, pvParameters) // 1
+static portTASK_FUNCTION(vProductora, pvParameters)
 {
+    PARAM_MENSAJE_PRODUCTO param;
+
     for (;;)
     {
-        xSemaphoreGive(semaforo);
+        param.id = (rand() % 100) + 1;
+
+        xQueueSend(cola, &param, portMAX_DELAY);
+
         vTaskDelay(pdMS_TO_TICKS(3000));
     }
 }
-static portTASK_FUNCTION(vConsumidora, pvParameters) // 1
+static portTASK_FUNCTION(vConsumidora, pvParameters)
 {
     PARAM_MENSAJE_PRODUCTO param;
     uint8_t frame[MAX_FRAME_SIZE];
@@ -228,10 +235,9 @@ static portTASK_FUNCTION(vConsumidora, pvParameters) // 1
 
     for (;;)
     {
-        xSemaphoreTake(semaforo, portMAX_DELAY);
-        vTaskDelay(pdMS_TO_TICKS(3000));
-        productosFabricados++;
+        xQueueReceive(cola, &param, portMAX_DELAY);
 
+        productosFabricados++;
         param.total_productos = productosFabricados;
 
         size = create_frame(frame, MENSAJE_PRODUCTO, &param, sizeof(param), MAX_FRAME_SIZE);
@@ -311,9 +317,16 @@ int main(void)
     if (NULL == mutexUSB)
         while (1)
             ;
-    semaforo = xSemaphoreCreateBinary();
+    // semaforo = xSemaphoreCreateBinary();2
 
-    if (semaforo == NULL)
+    /*if (semaforo == NULL)
+    {
+        while (1)
+            ;
+    }*/
+    // 2
+    cola = xQueueCreate(3, sizeof(PARAM_MENSAJE_PRODUCTO)); // 2
+    if (cola == NULL)
     {
         while (1)
             ;
