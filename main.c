@@ -46,7 +46,9 @@
 uint32_t g_ui32CPUUsage;
 uint32_t g_ui32SystemClock;
 SemaphoreHandle_t mutexUSB, mutexUART; // Para proteccion del canal USB y el caal UART -terminal-, ya que ahora lo van a usar varias tareas distintas
-
+SemaphoreHandle_t semaforo;            // 1
+uint32_t productosFabricados = 0;      // 1
+static uint8_t ledEstado = 0;          // 1
 //*****************************************************************************
 //
 // The error routine that is called if the driver library encounters an error.
@@ -210,11 +212,37 @@ static portTASK_FUNCTION(USBMessageProcessingTask, pvParameters)
     }
 }
 
-static portTASK_FUNCTION(vProductora, pvParameters)
+static portTASK_FUNCTION(vProductora, pvParameters) // 1
 {
+    for (;;)
+    {
+        xSemaphoreGive(semaforo);
+        vTaskDelay(pdMS_TO_TICKS(3000));
+    }
 }
-static portTASK_FUNCTION(vConsumidora, pvParameters)
+static portTASK_FUNCTION(vConsumidora, pvParameters) // 1
 {
+    PARAM_MENSAJE_PRODUCTO param;
+    uint8_t frame[MAX_FRAME_SIZE];
+    int32_t size;
+
+    for (;;)
+    {
+        xSemaphoreTake(semaforo, portMAX_DELAY);
+        vTaskDelay(pdMS_TO_TICKS(3000));
+        productosFabricados++;
+
+        param.total_productos = productosFabricados;
+
+        size = create_frame(frame, MENSAJE_PRODUCTO, &param, sizeof(param), MAX_FRAME_SIZE);
+
+        if (size > 0)
+        {
+            xSemaphoreTake(mutexUSB, portMAX_DELAY);
+            send_frame(frame, size);
+            xSemaphoreGive(mutexUSB);
+        }
+    }
 }
 //*****************************************************************************
 //
@@ -263,16 +291,16 @@ int main(void)
     // A partir de aqui se crean las tareas de usuario, y los recursos IPC que se vayan a necesitar
     //
 
-    if (xTaskCreate(vProductora, "prod", 512, NULL, tskIDLE_PRIORITY + 2, NULL) != pdPASS))
-        {
-            while (1)
-                ;
-        }
-    if (xTaskCreate(vConsumidora, "cons", 512, NULL, tskIDLE_PRIORITY + 2, NULL) != pdPASS))
-        {
-            while (1)
-                ;
-        }
+    if (xTaskCreate(vProductora, "prod", 512, NULL, tskIDLE_PRIORITY + 1, NULL) != pdPASS) // 1
+    {
+        while (1)
+            ;
+    }
+    if (xTaskCreate(vConsumidora, "cons", 512, NULL, tskIDLE_PRIORITY + 1, NULL) != pdPASS) // 1
+    {
+        while (1)
+            ;
+    }
 
     mutexUART = xSemaphoreCreateMutex();
     if (NULL == mutexUART)
@@ -283,7 +311,13 @@ int main(void)
     if (NULL == mutexUSB)
         while (1)
             ;
+    semaforo = xSemaphoreCreateBinary();
 
+    if (semaforo == NULL)
+    {
+        while (1)
+            ;
+    }
     //
     // Pone en marcha el planificador. La llamada NO tiene retorno
     //
