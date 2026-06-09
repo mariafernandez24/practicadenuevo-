@@ -213,18 +213,27 @@ static portTASK_FUNCTION(USBMessageProcessingTask, pvParameters)
         }
     }
 }
-
 static portTASK_FUNCTION(vProductora, pvParameters)
 {
     PARAM_MENSAJE_PRODUCTO param;
 
     for (;;)
     {
+        // EA3b: tiempo aleatorio entre 1 y 3 segundos
+        vTaskDelay(pdMS_TO_TICKS(1000));
+
         param.id = (rand() % 100) + 1;
 
-        xQueueSend(cola, &param, portMAX_DELAY);
+        if (xQueueSend(cola, &param, 0) != pdPASS)
+        {
 
-        vTaskDelay(pdMS_TO_TICKS(3000));
+            GPIOPinWrite(GPIO_PORTF_BASE, GPIO_PIN_1, GPIO_PIN_1);
+            vTaskDelete(NULL);
+        }
+        else
+        {
+            GPIOPinWrite(GPIO_PORTF_BASE, GPIO_PIN_1, 0);
+        }
     }
 }
 static portTASK_FUNCTION(vConsumidora, pvParameters)
@@ -239,7 +248,7 @@ static portTASK_FUNCTION(vConsumidora, pvParameters)
 
         productosFabricados++;
         param.total_productos = productosFabricados;
-
+        vTaskDelay(pdMS_TO_TICKS(3000));
         size = create_frame(frame, MENSAJE_PRODUCTO, &param, sizeof(param), MAX_FRAME_SIZE);
 
         if (size > 0)
@@ -325,12 +334,16 @@ int main(void)
             ;
     }*/
     // 2
-    cola = xQueueCreate(3, sizeof(PARAM_MENSAJE_PRODUCTO)); // 2
+    cola = xQueueCreate(1, sizeof(PARAM_MENSAJE_PRODUCTO)); // 2
     if (cola == NULL)
     {
         while (1)
             ;
     }
+    SysCtlPeripheralEnable(SYSCTL_PERIPH_GPIOF);
+    while (!SysCtlPeripheralReady(SYSCTL_PERIPH_GPIOF))
+        ;
+    GPIOPinTypeGPIOOutput(GPIO_PORTF_BASE, GPIO_PIN_1);
     //
     // Pone en marcha el planificador. La llamada NO tiene retorno
     //
