@@ -41,7 +41,7 @@
 #include "usb_messages_table.h"
 #include "config.h"
 #include "math.h"
-
+#include "event_groups.h"
 // Variables globales "main"
 uint32_t g_ui32CPUUsage;
 uint32_t g_ui32SystemClock;
@@ -51,6 +51,10 @@ uint32_t productosFabricados = 0; // 1
 static uint8_t ledEstado = 0;     // 1
 
 QueueHandle_t cola; // 2
+
+EventGroupHandle_t xEventos;   // B
+#define EVENTO_INICIO (1 << 0) // B
+
 //*****************************************************************************
 //
 // The error routine that is called if the driver library encounters an error.
@@ -188,6 +192,15 @@ static portTASK_FUNCTION(USBMessageProcessingTask, pvParameters)
                         }
                     }
                     break;
+                case MENSAJE_INICIO:
+                {
+                    xEventGroupSetBits(xEventos, EVENTO_INICIO);
+
+                    xSemaphoreTake(mutexUART, portMAX_DELAY);
+                    UARTprintf("Fabrica iniciada desde Qt\r\n");
+                    xSemaphoreGive(mutexUART);
+                }
+                break;
                 default:
                 {
                     PARAM_MENSAJE_NO_IMPLEMENTADO parametro;
@@ -213,7 +226,7 @@ static portTASK_FUNCTION(USBMessageProcessingTask, pvParameters)
         }
     }
 }
-static portTASK_FUNCTION(vProductora, pvParameters)
+/*static portTASK_FUNCTION(vProductora, pvParameters)
 {
     PARAM_MENSAJE_PRODUCTO param;
 
@@ -258,9 +271,49 @@ static portTASK_FUNCTION(vProductora2, pvParameters)
             GPIOPinWrite(GPIO_PORTF_BASE, GPIO_PIN_1, 0);
         }
     }
+}*/
+
+static portTASK_FUNCTION(vProductora, pvParameters)
+{
+    PARAM_TAREA *params = (PARAM_TAREA *)pvParameters;
+    xEventGroupWaitBits(
+        xEventos,
+        EVENTO_INICIO,
+        pdFALSE,
+        pdFALSE,
+        portMAX_DELAY);
+    for (;;)
+    {
+        vTaskDelay(pdMS_TO_TICKS(params->periodo_ms));
+        PARAM_MENSAJE_PRODUCTO param;
+
+        for (;;)
+        {
+            vTaskDelay(pdMS_TO_TICKS(1000));
+
+            param.id = (rand() % 100) + 1;
+            param.ID_PROD = 1;
+            if (xQueueSend(cola, &param, 0) != pdPASS)
+            {
+
+                GPIOPinWrite(GPIO_PORTF_BASE, GPIO_PIN_1, GPIO_PIN_1);
+                // vTaskDelete(NULL);
+            }
+            else
+            {
+                GPIOPinWrite(GPIO_PORTF_BASE, GPIO_PIN_1, 0);
+            }
+        }
+    }
 }
 static portTASK_FUNCTION(vConsumidora, pvParameters)
 {
+    xEventGroupWaitBits(
+        xEventos,
+        EVENTO_INICIO,
+        pdFALSE,
+        pdFALSE,
+        portMAX_DELAY);
     PARAM_MENSAJE_PRODUCTO param;
     uint8_t frame[MAX_FRAME_SIZE];
     int32_t size;
@@ -329,12 +382,25 @@ int main(void)
     // A partir de aqui se crean las tareas de usuario, y los recursos IPC que se vayan a necesitar
     //
 
-    if (xTaskCreate(vProductora, "prod", 512, NULL, tskIDLE_PRIORITY + 1, NULL) != pdPASS) // 1
+    /*if (xTaskCreate(vProductora, "prod", 512, NULL, tskIDLE_PRIORITY + 1, NULL) != pdPASS) // 1
     {
         while (1)
             ;
     }
     if (xTaskCreate(vProductora2, "prod", 512, NULL, tskIDLE_PRIORITY + 1, NULL) != pdPASS) // 1
+    {
+        while (1)
+            ;
+    }*/
+
+    static PARAM_TAREA prod1 = {1, 1000, GPIO_PIN_1};                                         // rojo
+    static PARAM_TAREA prod2 = {2, 3000, GPIO_PIN_3};                                         // verde
+    if (xTaskCreate(vProductora, "prod1", 512, &prod1, tskIDLE_PRIORITY + 1, NULL) != pdPASS) // 1
+    {
+        while (1)
+            ;
+    }
+    if (xTaskCreate(vProductora, "prod2", 512, &prod2, tskIDLE_PRIORITY + 1, NULL) != pdPASS) // 1
     {
         while (1)
             ;
@@ -368,6 +434,14 @@ int main(void)
         while (1)
             ;
     }
+
+    xEventos = xEventGroupCreate();
+
+    if (xEventos == NULL)
+    {
+        while (1)
+            ;
+    } // B
     SysCtlPeripheralEnable(SYSCTL_PERIPH_GPIOF);
     while (!SysCtlPeripheralReady(SYSCTL_PERIPH_GPIOF))
         ;
